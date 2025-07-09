@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 파일 업로더 & Presigned URL 생성기</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .upload-area {
+            border: 2px dashed #007bff;
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            background-color: #f8f9fa;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        .upload-area:hover {
+            border-color: #0056b3;
+            background-color: #e9ecef;
+        }
+        .upload-area.dragover {
+            border-color: #28a745;
+            background-color: #d4edda;
+        }
+        .file-info {
+            background-color: #e9ecef;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .result-card {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .url-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            word-break: break-all;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+        .loading {
+            display: none;
+        }
+        .progress-container {
+            display: none;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card shadow">
+                    <div class="card-header bg-primary text-white">
+                        <h3 class="mb-0">
+                            <i class="fas fa-cloud-upload-alt me-2"></i>
+                            S3 파일 업로더 & Presigned URL 생성기
+                        </h3>
+                    </div>
+                    <div class="card-body">
+                        <form id="uploadForm" enctype="multipart/form-data">
+                            <!-- 파일 업로드 영역 -->
+                            <div class="upload-area" id="uploadArea">
+                                <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-3"></i>
+                                <h5>파일을 드래그하거나 클릭하여 선택하세요</h5>
+                                <p class="text-muted">최대 10개의 파일을 동시에 업로드할 수 있습니다</p>
+                                <input type="file" id="fileInput" name="file" class="d-none" multiple required>
+                            </div>
+
+                            <!-- 선택된 파일 정보 -->
+                            <div id="fileInfo" class="file-info d-none">
+                                <h6><i class="fas fa-file me-2"></i>선택된 파일:</h6>
+                                <div id="fileList"></div>
+                                <div id="totalSize" class="text-muted mt-2"></div>
+                            </div>
+
+                            <!-- 만료 기간 설정 -->
+                            <div class="row mt-4">
+                                <div class="col-md-6">
+                                    <label for="expirationDays" class="form-label">
+                                        <i class="fas fa-calendar-alt me-2"></i>링크 유효 기간
+                                    </label>
+                                    <select class="form-select" id="expirationDays" name="expiration_days">
+                                        <option value="1">1일</option>
+                                        <option value="3">3일</option>
+                                        <option value="7" selected>7일 (기본값)</option>
+                                        <option value="14">14일</option>
+                                        <option value="30">30일</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- 업로드 버튼 -->
+                            <div class="mt-4">
+                                <button type="submit" class="btn btn-primary btn-lg w-100" id="uploadBtn">
+                                    <i class="fas fa-upload me-2"></i>업로드 & URL 생성
+                                </button>
+                            </div>
+
+                            <!-- 로딩 표시 -->
+                            <div class="loading text-center mt-3" id="loadingDiv">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="visually-hidden">업로드 중...</span>
+                                </div>
+                                <p class="mt-2">파일을 업로드하고 있습니다...</p>
+                            </div>
+
+                            <!-- 진행률 표시 -->
+                            <div class="progress-container" id="progressContainer">
+                                <div class="progress">
+                                    <div class="progress-bar" role="progressbar" style="width: 0%" id="progressBar"></div>
+                                </div>
+                            </div>
+                        </form>
+
+                        <!-- 결과 표시 -->
+                        <div id="resultDiv" class="d-none">
+                            <div class="result-card">
+                                <h5 class="text-success">
+                                    <i class="fas fa-check-circle me-2"></i>업로드 완료!
+                                </h5>
+                                
+                                <div class="row mt-3">
+                                    <div class="col-md-4">
+                                        <strong>업로드된 파일:</strong> <span id="resultFileCount"></span>개
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>총 크기:</strong> <span id="resultTotalSize"></span>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <strong>만료일:</strong> <span id="resultExpiry" class="text-warning"></span>
+                                    </div>
+                                </div>
+                                
+                                <div class="row mt-2">
+                                    <div class="col-md-6">
+                                        <strong>S3 버킷:</strong> <span id="resultBucket"></span>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <strong>리전:</strong> <span id="resultRegion"></span>
+                                    </div>
+                                </div>
+
+                                <!-- 파일 목록 및 다운로드 링크 -->
+                                <div class="mt-4">
+                                    <h6><strong>다운로드 링크:</strong></h6>
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        아래 링크를 복사하여 메일이나 메신저에 붙여넣으면 바로 다운로드 가능합니다.
+                                    </div>
+                                    
+                                    <!-- 복사 형태 선택 -->
+                                    <div class="mb-3">
+                                        <div class="btn-group" role="group">
+                                            <input type="radio" class="btn-check" name="copyFormat" id="formatText" value="text" checked>
+                                            <label class="btn btn-outline-primary" for="formatText">
+                                                <i class="fas fa-font me-1"></i>텍스트 형태
+                                            </label>
+                                            
+                                            <input type="radio" class="btn-check" name="copyFormat" id="formatHtml" value="html">
+                                            <label class="btn btn-outline-primary" for="formatHtml">
+                                                <i class="fas fa-code me-1"></i>HTML 형태
+                                            </label>
+                                        </div>
+                                        <small class="text-muted d-block mt-1">
+                                            텍스트 형태: 메일/메신저에서 클릭 가능한 링크로 표시 | HTML 형태: 웹페이지용
+                                        </small>
+                                    </div>
+                                    
+                                    <div id="fileLinksContainer" class="border rounded p-3" style="background-color: #f8f9fa; max-height: 300px; overflow-y: auto;">
+                                        <!-- 파일 링크들이 여기에 표시됩니다 -->
+                                    </div>
+                                </div>
+
+                                <!-- 전체 복사 및 액션 버튼 -->
+                                <div class="mt-3">
+                                    <button class="btn btn-primary" id="copyAllLinksBtn">
+                                        <i class="fas fa-copy me-2"></i>모든 링크 복사
+                                    </button>
+                                    <button class="btn btn-secondary ms-2" onclick="location.reload()">
+                                        <i class="fas fa-redo me-2"></i>새 파일 업로드
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 에러 표시 -->
+                        <div id="errorDiv" class="alert alert-danger d-none" role="alert">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <span id="errorMessage"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 사용법 안내 -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-info-circle me-2"></i>사용법</h5>
+                    </div>
+                    <div class="card-body">
+                        <ol>
+                            <li>위의 영역에 파일을 드래그하거나 클릭하여 <strong>최대 10개</strong>의 파일을 선택하세요.</li>
+                            <li>링크의 유효 기간을 선택하세요 (기본값: 7일).</li>
+                            <li>"업로드 & URL 생성" 버튼을 클릭하세요.</li>
+                            <li>생성된 <strong>하이퍼링크</strong>를 복사하여 메일이나 메신저에 붙여넣으세요.</li>
+                        </ol>
+                        <div class="alert alert-info">
+                            <strong>🔒 완전 보안 공유:</strong> 
+                            <ul class="mb-0 mt-2">
+                                <li><strong>AWS 정보 완전 숨김</strong>: Access Key, 버킷 정보 등 모든 민감 정보 비공개</li>
+                                <li><strong>보안 키 기반</strong>: 32자리 랜덤 보안 키로 파일 접근</li>
+                                <li><strong>프록시 다운로드</strong>: 서버를 통한 안전한 파일 전송</li>
+                                <li><strong>다운로드 추적</strong>: 다운로드 횟수 및 만료 시간 관리</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- S3 버킷 정보 -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h5><i class="fas fa-database me-2"></i>S3 버킷 정보</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <strong>버킷명:</strong> presigned-url-generator-janghwan
+                            </div>
+                            <div class="col-md-6">
+                                <strong>리전:</strong> us-west-2 (미국 서부)
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <small class="text-muted">
+                                <i class="fas fa-shield-alt me-1"></i>
+                                모든 파일은 고유한 이름으로 저장되어 중복을 방지합니다.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileList = document.getElementById('fileList');
+        const totalSize = document.getElementById('totalSize');
+        const uploadForm = document.getElementById('uploadForm');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const loadingDiv = document.getElementById('loadingDiv');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const resultDiv = document.getElementById('resultDiv');
+        const errorDiv = document.getElementById('errorDiv');
+
+        // 드래그 앤 드롭 이벤트
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                showFileInfo(files);
+            }
+        });
+
+        // 파일 선택 이벤트
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                showFileInfo(e.target.files);
+            }
+        });
+
+        // 파일 정보 표시
+        function showFileInfo(files) {
+            if (files.length > 10) {
+                showError('최대 10개의 파일만 선택할 수 있습니다.');
+                fileInput.value = '';
+                return;
+            }
+
+            let fileListHtml = '';
+            let totalSizeBytes = 0;
+
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                totalSizeBytes += file.size;
+                fileListHtml += `
+                    <div class="d-flex justify-content-between align-items-center py-1">
+                        <span><i class="fas fa-file me-2"></i>${file.name}</span>
+                        <small class="text-muted">${formatFileSize(file.size)}</small>
+                    </div>
+                `;
+            }
+
+            fileList.innerHTML = fileListHtml;
+            totalSize.innerHTML = `<strong>총 ${files.length}개 파일, ${formatFileSize(totalSizeBytes)}</strong>`;
+            fileInfo.classList.remove('d-none');
+        }
+
+        // 파일 크기 포맷팅
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 폼 제출 이벤트
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showError('파일을 선택해주세요.');
+                return;
+            }
+
+            if (fileInput.files.length > 10) {
+                showError('최대 10개의 파일만 업로드할 수 있습니다.');
+                return;
+            }
+
+            // UI 상태 변경
+            uploadBtn.disabled = true;
+            loadingDiv.style.display = 'block';
+            progressContainer.style.display = 'block';
+            resultDiv.classList.add('d-none');
+            errorDiv.classList.add('d-none');
+
+            const formData = new FormData();
+            
+            // 모든 파일을 FormData에 추가
+            for (let i = 0; i < fileInput.files.length; i++) {
+                formData.append('file', fileInput.files[i]);
+            }
+            
+            // 만료 기간 추가
+            formData.append('expiration_days', document.getElementById('expirationDays').value);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                // 응답 상태 확인
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Server error:', errorText);
+                    showError(`서버 오류 (${response.status}): 업로드에 실패했습니다. 콘솔을 확인해주세요.`);
+                    return;
+                }
+
+                // Content-Type 확인
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const errorText = await response.text();
+                    console.error('Non-JSON response:', errorText);
+                    showError('서버에서 올바르지 않은 응답을 받았습니다. 콘솔을 확인해주세요.');
+                    return;
+                }
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showResult(result);
+                } else {
+                    showError(result.error || '업로드에 실패했습니다.');
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                showError('네트워크 오류가 발생했습니다: ' + error.message);
+            } finally {
+                uploadBtn.disabled = false;
+                loadingDiv.style.display = 'none';
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        // 결과 표시
+        function showResult(result) {
+            document.getElementById('resultFileCount').textContent = result.file_count;
+            document.getElementById('resultTotalSize').textContent = formatFileSize(result.total_size);
+            document.getElementById('resultBucket').textContent = result.bucket_name;
+            document.getElementById('resultRegion').textContent = result.region;
+            document.getElementById('resultExpiry').textContent = result.expiry_date;
+            
+            // 전역 변수로 파일 데이터 저장
+            window.uploadedFiles = result.files;
+            
+            // 초기 표시 (텍스트 형태)
+            updateFileLinksDisplay();
+            
+            // 복사 형태 변경 이벤트
+            document.querySelectorAll('input[name="copyFormat"]').forEach(radio => {
+                radio.addEventListener('change', updateFileLinksDisplay);
+            });
+            
+            resultDiv.classList.remove('d-none');
+        }
+
+        // 파일 링크 표시 업데이트
+        function updateFileLinksDisplay() {
+            const format = document.querySelector('input[name="copyFormat"]:checked').value;
+            const fileLinksContainer = document.getElementById('fileLinksContainer');
+            let linksHtml = '';
+            
+            window.uploadedFiles.forEach((file, index) => {
+                const textLink = `${file.original_filename}: ${file.download_url}`;
+                const htmlLink = `<a href="${file.download_url}" target="_blank">${file.original_filename}</a>`;
+                
+                linksHtml += `
+                    <div class="mb-2 p-2 border-bottom">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="flex-grow-1 me-2">
+                                <div class="fw-bold mb-1">${index + 1}. ${file.original_filename}</div>
+                                <div class="small text-muted mb-2">크기: ${formatFileSize(file.file_size)}</div>
+                                <div class="copy-content p-2 bg-white border rounded" style="font-family: monospace; font-size: 0.85em; word-break: break-all;">
+                                    ${format === 'text' ? textLink : htmlLink}
+                                </div>
+                                <div class="small text-success mt-1">
+                                    <i class="fas fa-shield-alt me-1"></i>완전 보안 링크 (AWS 정보 완전 숨김)
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-primary copy-single-btn" 
+                                    data-text-link="${textLink}"
+                                    data-html-link="${htmlLink}">
+                                <i class="fas fa-copy"></i> 복사
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            fileLinksContainer.innerHTML = linksHtml;
+            
+            // 개별 복사 버튼 이벤트 추가
+            document.querySelectorAll('.copy-single-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const format = document.querySelector('input[name="copyFormat"]:checked').value;
+                    const link = format === 'text' ? 
+                        e.target.closest('button').dataset.textLink : 
+                        e.target.closest('button').dataset.htmlLink;
+                    await copyToClipboard(link, e.target.closest('button'));
+                });
+            });
+        }
+
+        // 에러 표시
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            errorDiv.classList.remove('d-none');
+        }
+
+        // 클립보드 복사 함수
+        async function copyToClipboard(text, button) {
+            try {
+                await navigator.clipboard.writeText(text);
+                const originalHtml = button.innerHTML;
+                button.innerHTML = '<i class="fas fa-check"></i> 복사됨';
+                button.classList.remove('btn-primary', 'btn-outline-primary');
+                button.classList.add('btn-success');
+                
+                setTimeout(() => {
+                    button.innerHTML = originalHtml;
+                    button.classList.remove('btn-success');
+                    button.classList.add('btn-primary');
+                }, 2000);
+            } catch (err) {
+                alert('클립보드 복사에 실패했습니다. 링크를 수동으로 복사해주세요.');
+            }
+        }
+
+        // 모든 링크 복사 기능
+        document.getElementById('copyAllLinksBtn').addEventListener('click', async () => {
+            const format = document.querySelector('input[name="copyFormat"]:checked').value;
+            let allLinks = '';
+            
+            window.uploadedFiles.forEach((file, index) => {
+                if (index > 0) allLinks += '\n';
+                
+                if (format === 'text') {
+                    allLinks += `${index + 1}. ${file.original_filename}: ${file.download_url}`;
+                } else {
+                    allLinks += `${index + 1}. <a href="${file.download_url}" target="_blank">${file.original_filename}</a>`;
+                }
+            });
+            
+            await copyToClipboard(allLinks, document.getElementById('copyAllLinksBtn'));
+        });
+    </script>
+</body>
+</html>
