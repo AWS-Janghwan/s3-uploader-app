@@ -20,6 +20,7 @@ pip install -r requirements.txt
 echo "Setting file permissions..."
 chmod +x app.py
 chmod -R 755 templates/
+chmod +x scripts/*.sh
 
 # SQLite 데이터베이스 파일 권한 설정 (있는 경우)
 if [ -f "file_links.db" ]; then

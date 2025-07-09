@@ -2,16 +2,15 @@ version: 0.0
 os: linux
 files:
   - source: /
-    destination: /home/ubuntu/s3-uploader-app
-    overwrite: yes
+    destination: /home/ubuntu/s3-uploader-app-new
 permissions:
-  - object: /home/ubuntu/s3-uploader-app
+  - object: /home/ubuntu/s3-uploader-app-new
     owner: ubuntu
     group: ubuntu
     mode: 755
     type:
       - directory
-  - object: /home/ubuntu/s3-uploader-app/app.py
+  - object: /home/ubuntu/s3-uploader-app-new/app.py
     owner: ubuntu
     group: ubuntu
     mode: 755
@@ -22,16 +21,16 @@ hooks:
     - location: scripts/stop_application.sh
       timeout: 300
       runas: ubuntu
+  Install:
+    - location: scripts/backup_and_replace.sh
+      timeout: 300
+      runas: ubuntu
   AfterInstall:
     - location: scripts/install_dependencies.sh
       timeout: 300
       runas: ubuntu
   ApplicationStart:
     - location: scripts/start_application.sh
-      timeout: 300
-      runas: ubuntu
-  ApplicationStop:
-    - location: scripts/stop_application.sh
       timeout: 300
       runas: ubuntu
   ValidateService:
