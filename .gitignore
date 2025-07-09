@@ -84,3 +84,8 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+
+# History files
+chat_history.md
+project_complete_history.md
+*_history.md
